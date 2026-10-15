@@ -5,6 +5,10 @@ on:
   push:
     tags: ["v*"]
 
+# The tarball job attaches its asset to the release.
+permissions:
+  contents: write
+
 jobs:
   packages:
     name: Build .deb and .rpm
@@ -36,3 +40,36 @@ jobs:
           name: linux-packages
           path: dist/packages/*
           if-no-files-found: error
+
+  tarball:
+    name: Build self-contained tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build tarball
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            packaging/build_tarball.sh "${GITHUB_REF_NAME#v}"
+          else
+            packaging/build_tarball.sh
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: dist/bundle/*.tar.xz
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/bundle/*.tar.xz --clobber \
+            || echo "release not created yet; attach the tarball manually"
