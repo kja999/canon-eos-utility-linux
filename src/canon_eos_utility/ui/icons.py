@@ -7,7 +7,7 @@ without shipping bitmap assets or relying on platform icon themes.
 from __future__ import annotations
 
 from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 _TRASH_SVG = (
@@ -90,3 +90,12 @@ def app_icon() -> QIcon:
     for size in (16, 24, 32, 48, 64, 128, 256):
         icon.addPixmap(_render_pixmap(_APP_SVG, size))
     return icon
+
+
+def app_logo(size: int = 160) -> QPixmap:
+    """The application mark (an aperture), rendered crisply at ``size`` logical px."""
+    screen = QGuiApplication.primaryScreen()
+    ratio = screen.devicePixelRatio() if screen is not None else 1.0
+    pixmap = _render_pixmap(_APP_SVG, max(1, round(size * ratio)))
+    pixmap.setDevicePixelRatio(ratio)
+    return pixmap

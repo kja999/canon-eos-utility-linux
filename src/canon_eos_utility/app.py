@@ -11,6 +11,7 @@ from . import APP_ID, APP_NAME
 from .config import AppConfig
 from .ui.icons import app_icon
 from .ui.main_window import MainWindow
+from .ui.splash import SplashScreen
 from .ui.theme import apply_theme
 
 
@@ -35,6 +36,8 @@ def run(argv: list[str] | None = None) -> int:
     app.setDesktopFileName(APP_ID)
     app.setWindowIcon(app_icon())
     apply_theme(app, AppConfig.load().accent_color)
+    splash = SplashScreen()
+    splash.start()
     window = MainWindow()
     window.show()
     return app.exec()

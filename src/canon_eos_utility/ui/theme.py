@@ -496,6 +496,22 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
     padding: 8px;
     font-family: monospace;
 }}
+
+/* -- splash ------------------------------------------------------------ */
+#splashRoot {{ background: transparent; }}
+#splashCard {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 18px;
+}}
+#splashCard QLabel {{ background: transparent; }}
+#splashTitle {{
+    color: {TEXT};
+    font-size: 26px;
+    font-weight: 600;
+}}
+#splashAuthor {{ color: {MUTED}; font-size: 13px; }}
+#splashVersion {{ color: {MUTED}; font-size: 11px; }}
 """
 
 
