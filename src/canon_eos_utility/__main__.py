@@ -1,0 +1,13 @@
+"""Command line entry point: ``canon-eos-utility``."""
+
+from __future__ import annotations
+
+from .app import run
+
+
+def main() -> int:
+    return run()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

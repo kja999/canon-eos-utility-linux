@@ -1,0 +1,31 @@
+name: Flatpak
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  flatpak:
+    name: Build Flatpak bundle
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-46
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: canon-eos-utility.flatpak
+          manifest-path: packaging/flatpak/org.problem_child.CanonEOSUtility.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          run-tests: false
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: canon-eos-utility.flatpak
+          if-no-files-found: error

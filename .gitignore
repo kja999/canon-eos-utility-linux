@@ -1,0 +1,30 @@
+# Byte cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# App data
+*.log
+/downloads/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store

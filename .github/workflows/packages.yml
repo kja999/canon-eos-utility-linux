@@ -1,0 +1,38 @@
+name: Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  packages:
+    name: Build .deb and .rpm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nfpm
+        run: |
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.48.0/nfpm_2.48.0_amd64.deb -o /tmp/nfpm.deb
+          sudo dpkg -i /tmp/nfpm.deb
+          nfpm --version
+
+      - name: Build packages
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            packaging/build_packages.sh "${GITHUB_REF_NAME#v}"
+          else
+            packaging/build_packages.sh
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/packages/*
+          if-no-files-found: error
