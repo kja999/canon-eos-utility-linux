@@ -35,8 +35,8 @@ modules:
         only-arches:
           - x86_64
         url: https://github.com/night199uk/canon-eos-utility-linux/releases/download/v0.1.0/canon-eos-utility-0.1.0-x86_64.tar.xz
-        sha256: 0000000000000000000000000000000000000000000000000000000000000000
-        size: 1
+        sha256: c00e8cb160c1681e6922652c8a2e0555036861d8eddff1c9ade74bc9e2263f1f
+        size: 59240152
       # END MANAGED EXTRA-DATA
       - type: file
         path: apply_extra.sh
