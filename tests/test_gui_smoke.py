@@ -358,8 +358,15 @@ def test_gallery_delete_button_emits_selected_handles(qapp):
     got: list[list[int]] = []
     panel.deleteRequested.connect(lambda handles: got.append(list(handles)))
 
-    assert not panel.delete_button.isEnabled()  # nothing selected
+    assert not panel.delete_button.isEnabled()  # nothing ticked
+
+    # Cursor/selection alone is not a selector: only checkboxes count.
     panel.list.item(0).setSelected(True)
+    assert not panel.delete_button.isEnabled()
+    panel._delete_selected()
+    assert got == []
+
+    panel.list.item(0).setCheckState(Qt.Checked)
     assert panel.delete_button.isEnabled()
     panel._delete_selected()
     assert got == [[1]]
@@ -418,6 +425,124 @@ def test_gallery_iconless_item_has_full_hit_area(qapp):
     assert rect.width() >= 150
     assert rect.height() >= 150
     assert panel.list.itemAt(rect.center()) is item
+
+
+def test_gallery_checkbox_click_and_space_toggle(qapp):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from canon_eos_utility.models import CameraObject
+    from canon_eos_utility.ui.gallery_panel import GalleryPanel
+
+    panel = GalleryPanel()
+    panel.resize(600, 400)
+    panel.set_connected(True)
+    panel.set_objects(
+        [
+            CameraObject(handle=1, storage_id=1, format=0x3801, size=1, filename="a.jpg"),
+            CameraObject(handle=2, storage_id=1, format=0x3801, size=1, filename="b.jpg"),
+        ]
+    )
+    panel.show()
+    qapp.processEvents()
+
+    item = panel.list.item(0)
+    rect = panel.list.visualItemRect(item)
+    box = QPoint(rect.x() + 17, rect.y() + 17)  # centre of the 18x18 box (inset 8)
+    body = rect.center()  # away from the checkbox
+    viewport = panel.list.viewport()
+
+    # A full press+release on the checkbox toggles it.
+    assert item.checkState() == Qt.Unchecked
+    QTest.mouseClick(viewport, Qt.LeftButton, Qt.NoModifier, box)
+    assert item.checkState() == Qt.Checked
+
+    # A drag that only ends on the checkbox (press on the body) must not.
+    QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, body)
+    QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, box)
+    assert item.checkState() == Qt.Checked
+
+    # The space bar toggles the current item.
+    panel.list.setFocus()
+    panel.list.setCurrentRow(0)
+    QTest.keyClick(panel.list, Qt.Key_Space)
+    assert item.checkState() == Qt.Unchecked
+    QTest.keyClick(panel.list, Qt.Key_Space)
+    assert item.checkState() == Qt.Checked
+
+    # With no current item (fresh grid, nothing clicked yet) space must still
+    # act on a sensible item rather than doing nothing.
+    panel.list.setCurrentRow(-1)
+    panel.list.clearSelection()
+    fresh = panel.list.item(0).checkState()
+    QTest.keyClick(panel.list, Qt.Key_Space)
+    assert panel.list.currentRow() == 0
+    assert panel.list.item(0).checkState() != fresh
+    QTest.keyClick(panel.list, Qt.Key_Space)
+
+    # Arrow keys move the cursor but must not touch any check state.
+    QTest.keyClick(panel.list, Qt.Key_Right)
+    assert item.checkState() == Qt.Checked
+    assert panel.list.item(1).checkState() == Qt.Unchecked
+    QTest.keyClick(panel.list, Qt.Key_Space)
+    assert panel.list.item(1).checkState() == Qt.Checked
+    assert item.checkState() == Qt.Checked
+
+    # A gallery refresh rebuilds the items but keeps the user's selection.
+    panel.set_objects(
+        [
+            CameraObject(handle=1, storage_id=1, format=0x3801, size=1, filename="a.jpg"),
+            CameraObject(handle=2, storage_id=1, format=0x3801, size=1, filename="b.jpg"),
+        ]
+    )
+    assert panel.list.item(0).checkState() == Qt.Checked
+    assert panel.list.item(1).checkState() == Qt.Checked
+    assert sorted(panel.selected_handles()) == [1, 2]
+
+
+def test_gallery_checkbox_paints_checked_state(qapp):
+    """Regression: the delegate must actually draw the tick.
+
+    ``index.data(Qt.CheckStateRole)`` yields a plain int, which does not compare
+    equal to ``Qt.Checked`` on PySide6 6.11, so a naive comparison painted every
+    box as unticked while the model said otherwise.
+    """
+    from PySide6.QtCore import Qt
+
+    from canon_eos_utility.models import CameraObject
+    from canon_eos_utility.ui.gallery_panel import GalleryPanel, _is_checked
+
+    # The comparison helper copes with both ints and enum members.
+    assert _is_checked(2) is True
+    assert _is_checked(Qt.Checked) is True
+    assert _is_checked(0) is False
+    assert _is_checked(Qt.Unchecked) is False
+    assert _is_checked(None) is False
+
+    def box_pixels(panel):
+        rect = panel.list.visualItemRect(panel.list.item(0))
+        box = panel.list.check_rect_for(panel.list.item(0)).adjusted(3, 3, -3, -3)
+        image = panel.list.viewport().grab().toImage()
+        return [
+            image.pixelColor(x, y).name()
+            for y in range(box.top() - rect.y(), box.bottom() - rect.y(), 3)
+            for x in range(box.left() - rect.x(), box.right() - rect.x(), 3)
+        ]
+
+    panel = GalleryPanel()
+    panel.resize(600, 400)
+    panel.set_connected(True)
+    panel.set_objects(
+        [CameraObject(handle=1, storage_id=1, format=0x3801, size=1, filename="a.jpg")]
+    )
+    panel.show()
+    qapp.processEvents()
+
+    unchecked = box_pixels(panel)
+    panel.list.item(0).setCheckState(Qt.Checked)
+    qapp.processEvents()
+    checked = box_pixels(panel)
+    assert unchecked != checked, "the checkbox looks identical when checked"
 
 
 def test_capture_waits_for_the_new_file(qapp):

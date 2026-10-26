@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -24,6 +24,24 @@ from .icons import image_icon, movie_icon, trash_icon
 from .theme import DANGER, MUTED
 
 _HANDLE_ROLE = Qt.UserRole + 1
+
+
+def _check_value(state: object) -> int | None:
+    """Normalise a ``Qt.CheckState`` payload to its integer value.
+
+    The value arrives in two shapes depending on the binding version: a plain
+    ``int`` from ``index.data(Qt.CheckStateRole)``, or a ``Qt.CheckState`` enum
+    member.  ``int()`` only works on the first, ``==`` only on the second, so
+    both are funnelled through ``.value`` here.
+    """
+    value = getattr(state, "value", state)
+    return value if isinstance(value, int) else None
+
+
+def _is_checked(state: object) -> bool:
+    """True if a ``Qt.CheckStateRole`` payload is the checked state."""
+    value = _check_value(state)
+    return value is not None and value == _check_value(Qt.Checked)
 
 
 class _GalleryDelegate(QStyledItemDelegate):
@@ -70,11 +88,12 @@ class _GalleryDelegate(QStyledItemDelegate):
         elided = metrics.elidedText(str(text), Qt.ElideMiddle, text_rect.width())
         painter.drawText(text_rect, Qt.AlignHCenter | Qt.AlignVCenter, elided)
 
-        checked = index.data(Qt.CheckStateRole) == Qt.Checked
-        self._draw_checkbox(painter, self._check_rect(rect), checked)
+        checked = _is_checked(index.data(Qt.CheckStateRole))
+        self._draw_checkbox(painter, self.check_rect(rect), checked)
         painter.restore()
 
-    def _check_rect(self, rect: QRect) -> QRect:
+    def check_rect(self, rect: QRect) -> QRect:
+        """Return the checkbox square for a cell rect (used for hit-testing)."""
         return QRect(
             rect.x() + self.CHECK_INSET,
             rect.y() + self.CHECK_INSET,
@@ -103,20 +122,89 @@ class _GalleryDelegate(QStyledItemDelegate):
             painter.setPen(QPen(QColor(theme.BORDER_STRONG), 1))
             painter.drawRoundedRect(box, 4, 4)
 
-    def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
-        if (
-            event.type() == QEvent.MouseButtonRelease
-            and event.button() == Qt.LeftButton
-            and self._check_rect(option.rect).contains(event.position().toPoint())
-        ):
-            checked = index.data(Qt.CheckStateRole) == Qt.Checked
-            model.setData(
-                index,
-                Qt.Unchecked if checked else Qt.Checked,
-                Qt.CheckStateRole,
-            )
-            return True
-        return super().editorEvent(event, model, option, index)
+
+class _CheckableListWidget(QListWidget):
+    """Icon grid whose checkboxes are toggled by the widget itself.
+
+    One code path serves both inputs: click (press *and* release on the same
+    box, so drags and rubber-band selections cannot toggle by accident) and
+    Space for the current item.  The view never lets Qt's own checkbox
+    handling run - the items carry no ``ItemIsUserCheckable`` flag and the
+    delegate has no ``editorEvent`` - so there is exactly one owner of the
+    check state and one place where a repaint is requested.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        #: Item whose box received the mouse press, or None.
+        self._press_item: QListWidgetItem | None = None
+
+    # -- public ----------------------------------------------------------
+
+    def toggle_item(self, item: QListWidgetItem | None) -> None:
+        """Flip the check state of *item* and repaint just that cell."""
+        if item is None:
+            return
+        item.setCheckState(Qt.Unchecked if _is_checked(item.checkState()) else Qt.Checked)
+        self.viewport().update(self.visualItemRect(item))
+
+    def check_rect_for(self, item: QListWidgetItem) -> QRect:
+        delegate = self.itemDelegate()
+        rect = self.visualItemRect(item)
+        if isinstance(delegate, _GalleryDelegate):
+            return delegate.check_rect(rect)
+        return rect
+
+    # -- events ----------------------------------------------------------
+
+    def keyPressEvent(self, event):  # noqa: N802 (Qt naming)
+        if event.key() in (Qt.Key_Space, Qt.Key_Select):
+            self.toggle_item(self._space_target())
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _space_target(self) -> QListWidgetItem | None:
+        """Item the space bar applies to.
+
+        ``currentItem()`` is None until the user clicks or arrows into the
+        grid, which would make an initial space press do nothing.  Fall back
+        to the item under the mouse, then to the first item, and adopt it as
+        current so the highlight shows what the next press will hit.
+        """
+        item = self.currentItem()
+        if item is None:
+            item = self.itemAt(self.viewport().mapFromGlobal(QCursor.pos()))
+        if item is None and self.count():
+            item = self.item(0)
+        if item is not None:
+            self.setCurrentItem(item)
+        return item
+
+    def mousePressEvent(self, event):  # noqa: N802 (Qt naming)
+        self._press_item = self._item_at_box(event)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 (Qt naming)
+        item = self._item_at_box(event)
+        toggled = item is not None and item is self._press_item
+        self._press_item = None
+        if toggled:
+            self.toggle_item(item)
+        # Always let the view finish its own drag/selection bookkeeping.
+        super().mouseReleaseEvent(event)
+        if toggled:
+            event.accept()
+
+    def _item_at_box(self, event) -> QListWidgetItem | None:
+        """Item whose checkbox square is under the mouse, if any."""
+        if event.button() != Qt.LeftButton:
+            return None
+        pos: QPoint = event.position().toPoint()
+        item = self.itemAt(pos)
+        if item is None or not self.check_rect_for(item).contains(pos):
+            return None
+        return item
 
 
 class GalleryPanel(QWidget):
@@ -158,7 +246,7 @@ class GalleryPanel(QWidget):
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
-        self.list = QListWidget()
+        self.list = _CheckableListWidget()
         self.list.setViewMode(QListWidget.IconMode)
         self.list.setResizeMode(QListWidget.Adjust)
         self.list.setMovement(QListWidget.Static)
@@ -222,7 +310,7 @@ class GalleryPanel(QWidget):
             self.clear()
 
     def _update_delete_enabled(self) -> None:
-        self.delete_button.setEnabled(self._connected and bool(self.selected_handles()))
+        self.delete_button.setEnabled(self._connected and bool(self.checked_handles()))
 
     def clear(self) -> None:
         self.list.clear()
@@ -231,16 +319,21 @@ class GalleryPanel(QWidget):
         self._update_delete_enabled()
 
     def set_objects(self, objects: list[CameraObject]) -> None:
+        # Rebuilding the list discards check states, so remember which handles
+        # the user had selected and restore them afterwards.
+        checked = {handle for handle, item in self._items.items() if _is_checked(item.checkState())}
         self.list.clear()
         self._items.clear()
         for obj in objects:
+            checked_state = Qt.Checked if obj.handle in checked else Qt.Unchecked
             item = QListWidgetItem(obj.filename or f"0x{obj.handle:08X}")
             # Stored as a string: Canon handles are unsigned 32-bit and would
             # overflow Qt's signed int QVariant conversion.
             item.setData(_HANDLE_ROLE, str(obj.handle))
-            # Check state is handled by _GalleryDelegate (which draws its own
-            # checkbox); leave the flag off so the view does not also toggle it.
-            item.setCheckState(Qt.Unchecked)
+            # Check state is handled by _CheckableListWidget (which draws its
+            # own checkbox); leave ItemIsUserCheckable off so the view does not
+            # also toggle it and Qt never draws a second indicator.
+            item.setCheckState(checked_state)
             # Fill the grid cell so the whole thumbnail area is clickable even
             # when there is no preview image yet.
             item.setSizeHint(_cell_size())
@@ -282,13 +375,21 @@ class GalleryPanel(QWidget):
         self.progress.setMaximum(total)
         self.progress.setValue(done)
 
-    def selected_handles(self) -> list[int]:
+    def checked_handles(self) -> list[int]:
+        """Handles with a ticked checkbox - the only download/delete selector.
+
+        Cursor/selection state is deliberately ignored: moving through the
+        grid with the arrow keys must never add files to an action.
+        """
         handles: list[int] = []
         for index in range(self.list.count()):
             item = self.list.item(index)
-            if item.checkState() == Qt.Checked or item.isSelected():
+            if _is_checked(item.checkState()):
                 handles.append(self._handle_of(item))
         return handles
+
+    #: Backwards-compatible alias; selection is no longer part of the set.
+    selected_handles = checked_handles
 
     def all_handles(self) -> list[int]:
         return [self._handle_of(self.list.item(i)) for i in range(self.list.count())]
@@ -308,9 +409,10 @@ class GalleryPanel(QWidget):
         state = Qt.Checked if checked else Qt.Unchecked
         for index in range(self.list.count()):
             self.list.item(index).setCheckState(state)
+        self.list.viewport().update()
 
     def _download_selected(self) -> None:
-        handles = self.selected_handles()
+        handles = self.checked_handles()
         if handles:
             self.downloadRequested.emit(handles)
 
@@ -320,7 +422,7 @@ class GalleryPanel(QWidget):
             self.downloadRequested.emit(handles)
 
     def _delete_selected(self) -> None:
-        handles = self.selected_handles()
+        handles = self.checked_handles()
         if handles:
             self.deleteRequested.emit(handles)
 
