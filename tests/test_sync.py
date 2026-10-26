@@ -5,10 +5,14 @@ from canon_eos_utility.mock import MockCameraServer
 from canon_eos_utility.models import CameraObject
 from canon_eos_utility.protocol import CameraClient
 from canon_eos_utility.sync import (
+    POLICY_ASK,
+    POLICY_OVERWRITE,
     CameraSync,
     SyncState,
+    early_skip,
     output_for,
     partial_path,
+    preview_target,
     unique_target,
 )
 
@@ -70,6 +74,65 @@ def test_camera_sync_downloads_and_skips(tmp_path):
     finally:
         client.disconnect()
         server.stop()
+
+
+def test_early_skip_avoids_downloading_existing_files(tmp_path):
+    server = MockCameraServer(port=0)
+    server.start()
+    client = CameraClient(
+        host="127.0.0.1", port=server.port, client_name="test", client_guid=bytes(16)
+    )
+    try:
+        client.open()
+        device = client.get_device_info()
+        context = {
+            "model": device.model,
+            "manufacturer": device.manufacturer,
+            "serial": device.serial_number,
+            "firmware": device.device_version,
+            "name": client.info.name,
+        }
+        config = AppConfig(filename_template="${original.name}", download_directory=str(tmp_path))
+        sync = CameraSync(client, config, context)
+        obj = sync.media_objects()[0]
+
+        target = tmp_path / obj.filename
+        target.write_bytes(b"already local")
+
+        # Predictable destination that exists → skipped before any transfer.
+        assert early_skip(obj, str(tmp_path), "${original.name}", context, POLICY_ASK) is True
+        assert sync.download(obj) is None
+        assert target.read_bytes() == b"already local"  # untouched
+        assert not list((tmp_path / ".canon-eos-partial").glob("*.part"))
+
+        # An explicit overwrite policy still transfers the file.
+        sync.policy = POLICY_OVERWRITE
+        assert (
+            early_skip(obj, str(tmp_path), "${original.name}", context, POLICY_OVERWRITE) is False
+        )
+        assert sync.download(obj) is not None
+    finally:
+        client.disconnect()
+        server.stop()
+
+
+def test_preview_target_cannot_predict_exif_templates():
+    obj = CameraObject(
+        handle=1,
+        storage_id=1,
+        format=0x3801,
+        size=1,
+        filename="a.jpg",
+        capture_date="20260912T150605.0",
+    )
+    # EXIF-based templates are unpredictable → no early skip, ever.
+    assert preview_target(obj, "/out", "${exif.iso}/${original.name}", {}) is None
+    assert early_skip(obj, "/out", "${exif.iso}/${original.name}", {}, POLICY_ASK) is False
+    # PTP-based templates can be predicted from the listing alone.
+    assert (
+        preview_target(obj, "/out", "${capture.date}/${original.name}", {})
+        == "/out/2026-09-12/a.jpg"
+    )
 
 
 def test_output_for_routes_videos_separately(tmp_path):

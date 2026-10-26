@@ -7,6 +7,7 @@ from canon_eos_utility.naming import (
     render,
     render_target_path,
     sanitize_relative_path,
+    template_uses_exif,
 )
 
 
@@ -123,3 +124,11 @@ def test_week_and_weekday_variables():
     assert render("${capture.weekday}", context) == str(moment.isoweekday())
     assert render("${capture.weekday_short}", context) == moment.strftime("%a")
     assert render("${capture.weekday_name}", context) == moment.strftime("%A")
+
+
+def test_template_uses_exif_detection():
+    assert not template_uses_exif("${capture.date}/${original.name}")
+    assert not template_uses_exif("x/${image.width}/${camera.model}")
+    assert template_uses_exif("${exif.iso}")
+    assert template_uses_exif("${exif.iso|unknown}")
+    assert template_uses_exif("${exif.f_number:0.1f}")

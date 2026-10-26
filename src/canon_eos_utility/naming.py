@@ -74,6 +74,20 @@ def render(template: str, context: Mapping[str, Any], default: str = "") -> str:
     return _TOKEN.sub(replace, template)
 
 
+def template_uses_exif(template: str) -> bool:
+    """True if the template references any ``exif.*`` field.
+
+    EXIF values are only known once the file has been downloaded, so for such
+    templates the destination path cannot be predicted in advance.
+    """
+    for match in _TOKEN.finditer(template):
+        expression = match.group(1)
+        expression = expression.partition("|")[0].partition(":")[0].strip()
+        if expression == "exif" or expression.startswith("exif."):
+            return True
+    return False
+
+
 def _apply_format(value: Any, fmt: str) -> Any:
     if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
         try:

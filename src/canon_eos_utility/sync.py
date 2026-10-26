@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from .exceptions import CameraError
 from .metadata import parse_ptp_datetime, read_metadata
-from .naming import build_context, render_target_path
+from .naming import build_context, render_target_path, template_uses_exif
 
 PART_SUFFIX = ".part"
 PARTIAL_DIRNAME = ".canon-eos-partial"
@@ -105,6 +105,43 @@ def finalize_download(
         apply_file_time(target, taken)
 
     return target
+
+
+def preview_target(obj, directory: str, template: str, camera_context: dict) -> str | None:
+    """Predict the destination path for ``obj`` without its file metadata.
+
+    Uses the PTP object fields (capture date, size, dimensions) that are known
+    before downloading.  Returns ``None`` when the template references EXIF
+    fields, which are only known after the file has been transferred — in that
+    case the destination cannot be predicted and no early skip is possible.
+    """
+    if template_uses_exif(template):
+        return None
+    context = build_context(camera_context, obj, None)
+    extension = os.path.splitext(obj.filename or "")[1]
+    return render_target_path(template, context, directory, original_extension=extension)
+
+
+def early_skip(
+    obj,
+    directory: str,
+    template: str,
+    camera_context: dict,
+    policy: str,
+    ask=None,
+) -> bool:
+    """Return True when ``obj`` should not be downloaded at all.
+
+    The destination is resolved from the PTP object fields (no file metadata);
+    if that file already exists and the policy says to skip it, the transfer
+    is avoided entirely.  Unpredictable (EXIF-based) templates always return
+    False — the post-download check in :func:`finalize_download` remains the
+    safety net for those.
+    """
+    candidate = preview_target(obj, directory, template, camera_context)
+    if candidate is None or not os.path.exists(candidate):
+        return False
+    return resolve_target(candidate, policy, ask) is None
 
 
 def apply_file_time(path: str, when) -> None:
@@ -232,6 +269,9 @@ class CameraSync:
             directory, resolved = self.output_for(obj)
             template = template or resolved
         template = template or self.config.filename_template
+
+        if early_skip(obj, directory, template, self.camera_context, self.policy, self.ask):
+            return None
 
         filename = obj.filename or f"IMG_{obj.handle}"
         part = partial_path(directory, filename)

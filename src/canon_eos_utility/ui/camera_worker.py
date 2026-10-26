@@ -32,6 +32,7 @@ from ..sync import (
     POLICY_ASK,
     POLICY_OVERWRITE,
     POLICY_SKIP,
+    early_skip,
     finalize_download,
     partial_path,
 )
@@ -497,6 +498,20 @@ class CameraWorker(QObject):
                 self._pause_downloads()
                 return
 
+            # Avoid transferring files we already have locally; the same check
+            # runs again at finalize for templates that cannot be predicted.
+            if early_skip(
+                obj,
+                base,
+                template,
+                self._camera_context,
+                self._overwrite_policy,
+                self._resolve_conflict,
+            ):
+                self.statusChanged.emit(f"Skipped {filename} (already exists)")
+                self._pending_downloads.pop(0)
+                continue
+
             part = partial_path(base, filename)
             offset = os.path.getsize(part) if os.path.exists(part) else 0
             done = self._download_total - len(self._pending_downloads)
@@ -575,6 +590,7 @@ class CameraWorker(QObject):
                     if offset == 0 and exc.response_code in (
                         ResponseCode.OPERATION_NOT_SUPPORTED,
                         ResponseCode.PARAMETER_NOT_SUPPORTED,
+                        ResponseCode.INVALID_PARAMETER,
                     ):
                         return self._download_full(handle, part)
                     if not self._recover(filename, exc, recoveries):
