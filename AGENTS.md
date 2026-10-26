@@ -35,7 +35,31 @@ pip install -e ".[dev]"
 
 # Packaging (needs nfpm on PATH): builds GUI + CLI .deb and .rpm
 packaging/build_packages.sh
+
+# Flatpak — how the app is installed on this PC. Build it INSIDE the toolbox;
+# the host has no flatpak-builder. `-u keitha` is required (as root, bwrap dies
+# with "Can't find source path /proc/self/fd/12"), and HOME must point at the
+# host home so the install lands on the host's user instance.
+podman exec -u keitha -e HOME=$HOME -w "$PWD" fedora-toolbox-44 bash -c \
+  'flatpak-builder --user --install --force-clean --state-dir=/tmp/kstate /tmp/kbuild \
+     packaging/flatpak/org.problem_child.CanonEOSUtility.yml'
+flatpak run org.problem_child.CanonEOSUtility
 ```
+
+**Full Flatpak procedure, failure modes and verification recipe:** see the note
+*"Canon EOS Utility — local Flatpak install process (build in toolbox)"* —
+http://192.168.1.200:9991/#root/xOpvLWyDcGvH/4xnsIMiydtTQ .
+
+## Branches
+
+- `main` mirrors `night199uk/canon-eos-utility-linux` (remote `upstream`) and
+  carries **no local work**. Each change lives on its own topic branch off
+  `main` (`fix/…`, `feat/…`, `docs/…`) with one commit and its tests, and is
+  pushed to the fork at `origin` (`kja999/canon-eos-utility-linux`) for
+  reference — upstream is not contacted unless asked.
+- `local/integration` merges the topic branches and is **the branch to install
+  and test from**. Building the Flatpak from `main` silently ships upstream's
+  code — e.g. it reverts the gallery checkbox fix.
 
 ## Architecture rules
 
