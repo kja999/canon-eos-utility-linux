@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -46,6 +47,16 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        # Content lives in a scroll area so the dialog stays usable on
+        # short screens; the button box stays pinned below it.
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        layout.addWidget(scroll, 1)
+
         # -- photos --------------------------------------------------------
         photo_group = QGroupBox("Photos")
         photo_layout = QVBoxLayout(photo_group)
@@ -66,7 +77,7 @@ class SettingsDialog(QDialog):
         photo_layout.addWidget(QLabel("Preview:"))
         self.photo_preview_label = _preview_label()
         photo_layout.addWidget(self.photo_preview_label)
-        layout.addWidget(photo_group)
+        content_layout.addWidget(photo_group)
 
         # -- videos --------------------------------------------------------
         video_group = QGroupBox("Videos")
@@ -100,7 +111,7 @@ class SettingsDialog(QDialog):
         video_layout.addWidget(QLabel("Preview:"))
         self.video_preview_label = _preview_label()
         video_layout.addWidget(self.video_preview_label)
-        layout.addWidget(video_group)
+        content_layout.addWidget(video_group)
 
         # -- variables reference ------------------------------------------
         variables_group = QGroupBox("Available variables")
@@ -110,7 +121,7 @@ class SettingsDialog(QDialog):
         for name, description in AVAILABLE_VARIABLES:
             QListWidgetItem(f"${{{name}}}  —  {description}", variable_list)
         variables_layout.addWidget(variable_list)
-        layout.addWidget(variables_group)
+        content_layout.addWidget(variables_group)
 
         # -- options -------------------------------------------------------
         options_group = QGroupBox("Options")
@@ -144,9 +155,9 @@ class SettingsDialog(QDialog):
         self.accent_edit.setToolTip("Accent colour. 'auto' follows the system/GTK theme highlight.")
         accent_form.addRow("Accent colour:", self.accent_edit)
         options_layout.addLayout(accent_form)
-        layout.addWidget(options_group)
+        content_layout.addWidget(options_group)
 
-        layout.addWidget(
+        content_layout.addWidget(
             QLabel(f"Configuration file: <code>{config_path()}</code> (editable by hand too)")
         )
 
