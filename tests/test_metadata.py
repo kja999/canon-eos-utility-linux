@@ -85,3 +85,46 @@ def test_read_mp4_creation_time(tmp_path):
     metadata = read_metadata(str(movie))
     assert metadata.source == "mp4"
     assert metadata.taken == datetime.datetime(2023, 11, 14, 22, 13, 20)
+
+
+def _large_tiff(size: int) -> bytes:
+    """TIFF block whose payload exceeds the 64 KiB EXIF APP1 limit."""
+    import io
+
+    from PIL import Image
+
+    image = Image.new("RGB", (10, 10), (120, 30, 30))
+    exif = image.getexif()
+    exif[0x0110] = "Canon EOS R5"
+    buffer = io.BytesIO()
+    image.save(buffer, "TIFF", exif=exif)
+    tiff = buffer.getvalue()
+    assert len(tiff) < size
+    return tiff + b"\x00" * (size - len(tiff))
+
+
+def test_wrap_tiff_as_app1_truncates_oversized_tiff():
+    """Regression: a >64 KiB TIFF used to overflow the 16-bit APP1 length."""
+    import struct
+
+    from canon_eos_utility.metadata import _EXIF_HEADER, _wrap_tiff_as_app1
+
+    tiff = _large_tiff(200_000)
+    segment = _wrap_tiff_as_app1(tiff)
+
+    assert segment[:2] == b"\xff\xe1"
+    (length,) = struct.unpack(">H", segment[2:4])
+    assert length <= 0xFFFF
+    assert length == len(segment) - 4 - 2  # marker + length + trailing EOI
+    # The IFDs live at the front, so the head of the TIFF is kept verbatim.
+    assert segment[4 : 4 + len(_EXIF_HEADER)] == _EXIF_HEADER
+    assert segment[4 + len(_EXIF_HEADER) : -2] == tiff[: length - len(_EXIF_HEADER)]
+    assert segment.endswith(b"\xff\xd9")
+
+
+def test_read_tags_from_oversized_tiff_block():
+    """Truncation must not stop the tags at the head of the block being read."""
+    from canon_eos_utility.metadata import _read_wrapped_tags
+
+    tags = _read_wrapped_tags(_large_tiff(200_000))
+    assert "Canon EOS R5" in tags.values()

@@ -229,8 +229,14 @@ def _find_box(data: bytes, box_type: bytes) -> bytes | None:
 
 
 def _wrap_tiff_as_app1(tiff: bytes) -> bytes:
-    """Wrap a raw TIFF block in a minimal APP1 segment the ``exif`` lib accepts."""
-    segment = _EXIF_HEADER + tiff
+    """Wrap a raw TIFF block in a minimal APP1 segment the ``exif`` lib accepts.
+
+    The JPEG EXIF APP1 segment has a 16-bit length field (max 65535 bytes), so
+    only the first portion of the TIFF data is wrapped.  The metadata (IFDs) are
+    at the beginning of the file, so truncating the image data at the end is safe.
+    """
+    max_tiff = 65535 - len(_EXIF_HEADER) - 2  # 65535 - 6 - 2 = 65527
+    segment = _EXIF_HEADER + tiff[:max_tiff]
     return b"\xff\xe1" + struct.pack(">H", len(segment)) + segment + b"\xff\xd9"
 
 
