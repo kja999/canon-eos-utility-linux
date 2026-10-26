@@ -45,7 +45,9 @@ class _GalleryDelegate(QStyledItemDelegate):
 
         if option.state & QStyle.State_Selected:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(198, 142, 110, 72))
+            tint = QColor(theme.ACCENT)
+            tint.setAlpha(72)
+            painter.setBrush(tint)
             painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 6, 6)
         elif option.state & QStyle.State_MouseOver:
             painter.setPen(Qt.NoPen)

@@ -113,10 +113,15 @@ def set_accent(color: QColor) -> None:
 def resolve_accent(app: QApplication | None, value: str = "auto") -> QColor:
     """Return the accent colour to use.
 
-    Precedence: an explicit ``value`` (hex) → the Qt platform theme's highlight
-    (e.g. the GTK/KDE theme when ``QT_QPA_PLATFORMTHEME`` is set) → the active
-    GTK theme's selected colour → GNOME's accent setting → the built-in accent.
-    The chosen colour is applied via :func:`set_accent`.
+    Precedence: an explicit ``value`` (hex) → the desktop portal's accent →
+    GNOME's accent setting → the active GTK theme's selected colour → the Qt
+    platform theme's highlight → the built-in accent.
+
+    Qt's own highlight comes last on purpose: with the Fusion style it is a
+    fixed style colour (``#15539e``), not a system accent.  The GTK CSS comes
+    after GNOME's setting because Adwaita's stylesheet still carries a literal
+    blue for ``theme_selected_bg_color`` instead of tracking the accent.  The
+    chosen colour is applied via :func:`set_accent`.
     """
     text = (value or "auto").strip()
     if text and text.lower() != "auto":
@@ -125,7 +130,7 @@ def resolve_accent(app: QApplication | None, value: str = "auto") -> QColor:
             set_accent(color)
             return color
 
-    color = _platform_highlight(app) or _gtk_theme_color() or _gnome_accent()
+    color = _portal_accent() or _gnome_accent() or _gtk_theme_color() or _platform_highlight(app)
     if color is None or not color.isValid():
         color = QColor(DEFAULT_ACCENT)
     set_accent(color)
@@ -235,6 +240,54 @@ def _gnome_accent() -> QColor | None:
         return None
     hex_value = _GNOME_ACCENTS.get(name.lower())
     return QColor(hex_value) if hex_value else None
+
+
+def _portal_accent() -> QColor | None:
+    """Read the accent through the desktop portal.
+
+    Inside a sandbox ``gsettings`` cannot reach dconf, but the settings portal
+    is always available and exposes ``org.freedesktop.appearance
+    accent-color`` as three 0..1 doubles (GNOME 47+).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.portal.Desktop",
+                "--object-path",
+                "/org/freedesktop/portal/desktop",
+                "--method",
+                "org.freedesktop.portal.Settings.Read",
+                "org.freedesktop.appearance",
+                "accent-color",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_portal_accent(result.stdout)
+
+
+def _parse_portal_accent(output: str) -> QColor | None:
+    """Parse ``(<<(0.92, 0.35, 0.0)>>,)`` from the settings portal."""
+    match = re.search(
+        r"\(\s*<*\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)",
+        output,
+    )
+    if not match:
+        return None
+    red, green, blue = (round(float(value) * 255) for value in match.groups())
+    if red == 0 and green == 0 and blue == 0:
+        return None  # portal reports (0, 0, 0) when the key is unsupported
+    return QColor(red, green, blue)
 
 
 def build_stylesheet(font_family: str = "Inter") -> str:
